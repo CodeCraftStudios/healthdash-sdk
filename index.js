@@ -33,15 +33,16 @@ import { EarnPointsModule } from "./services/earn-points.js";
 import { SitemapModule } from "./services/sitemap.js";
 import { AdminModule } from "./services/admin.js";
 import { ContentTypesModule } from "./services/content-types.js";
+import { PageGroupsModule, PageGroup } from "./services/page-groups.js";
 import { CalendarModule } from "./services/calendar.js";
 
 // =============================================================================
 // MAIN CLIENT
 // =============================================================================
 
-export class DashClient {
+export class HealthDashClient {
   /**
-   * Create a new DashClient instance
+   * Create a new HealthDashClient instance
    * @param {Object} options - Configuration options
    * @param {string} options.apiKey - Your API key (pk_* or sk_*) from DevDash dashboard
    * @param {string} [options.baseURL] - Optional: Override API URL (for local development only)
@@ -89,7 +90,7 @@ export class DashClient {
     this._sessionId = null;
     this.version = "0.1.2";
 
-    // Startup info table — prints once per process, not per DashClient instance
+    // Startup info table — prints once per process, not per HealthDashClient instance
     // (Next.js SSR creates a new client per request/worker, which used to spam logs)
     this._printStartupInfo();
 
@@ -121,11 +122,23 @@ export class DashClient {
     this.sitemap = new SitemapModule(this);
     this.calendar = new CalendarModule(this);
 
+    // ── Page Groups (storefront content collections) ───────────────────
+    // Public reads. Use either:
+    //   const { items } = await dash.pageGroup("doctors").all();
+    //   const list      = await dash.pageGroups.list();
+    // The `pageGroup(slug)` shortcut returns a fluent builder so you can
+    // chain `.all() / .get() / .filter() / .find() / .count()`.
+    this.pageGroups = new PageGroupsModule(this);
+    this.pageGroup = (slug) => this.pageGroups.group(slug);
+
     // Admin module — only available with secret keys (sk_*)
     if (apiKey.startsWith("sk_")) {
       this.admin = new AdminModule(this);
-      this.contentTypes = new ContentTypesModule(this);
     }
+    // Legacy alias — kept so existing apps keep working. New code should use
+    // `dash.pageGroup(slug)` or `dash.pageGroups`. ContentTypesModule will be
+    // removed in a future major version.
+    this.contentTypes = new ContentTypesModule(this);
 
     // Inject footer branding for all keys (production and test)
     if (typeof window !== "undefined") {
@@ -147,7 +160,7 @@ export class DashClient {
     if (typeof window !== "undefined") return;
 
     // Guard: print once per (process, apiKey) pair. Next.js SSR instantiates a
-    // new DashClient per request/worker so the banner used to fire dozens of
+    // new HealthDashClient per request/worker so the banner used to fire dozens of
     // times per page. Setting HEALTHDASHSDK_SILENT=1 silences it entirely.
     if (process.env.HEALTHDASHSDK_SILENT === "1") return;
     if (!globalThis.__HEALTHDASHSDK_PRINTED__) globalThis.__HEALTHDASHSDK_PRINTED__ = new Set();
@@ -499,4 +512,9 @@ export { CalendarModule } from "./services/calendar.js";
 export { AuthorizeNetCSR } from "./processors/authorize-net.js";
 
 // Default export
-export default DashClient;
+export default HealthDashClient;
+
+// Back-compat alias — `DashClient` is the legacy export name. Keep it
+// available as a named export so existing consumers don't break, but new
+// code should use `HealthDashClient`.
+export { HealthDashClient as DashClient };

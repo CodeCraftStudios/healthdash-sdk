@@ -4,6 +4,51 @@
 
 Built by [CodeCraft Studios](https://www.codecraftstudios.net)
 
+## Page Groups (storefront content collections)
+
+Dynamic content types defined in the dashboard's **Page Groups** section
+(Doctors, Services, Locations, FAQ, etc.). Public reads — no `sk_*` key
+required.
+
+```js
+import { HealthDashClient } from "healthdashsdk";
+const dash = new HealthDashClient({ apiKey: process.env.HEALTHDASH_KEY });
+
+// Fluent shortcut on the client (preferred):
+const { items, total } = await dash.pageGroup("doctors").all();
+const dr               = await dash.pageGroup("doctors").get("dr-patel");
+const cardiologists    = await dash.pageGroup("doctors")
+                              .filter({ specialty: "cardiology" });
+const onCall           = await dash.pageGroup("doctors")
+                              .find(d => d.metadata?.on_call_today);
+const howMany          = await dash.pageGroup("doctors").count();
+
+// Or list every group:
+const { content_types } = await dash.pageGroups.list();
+```
+
+### `dash.pageGroup(slug)` → `PageGroup`
+
+| Method | Returns | Notes |
+|---|---|---|
+| `.all({ limit?, offset? })` | `{ content_type, items, total }` | Server-paginated. |
+| `.get(itemSlug)` | `{ item }` | Single item by slug. |
+| `.filter(predicate, options?)` | `item[]` | Predicate is a function or object spec — keys match top-level, then `metadata`, then `custom_fields`. Filtering is client-side after `.all()`. |
+| `.find(predicate)` | `item \| null` | First match. |
+| `.count()` | `number` | Uses pagination metadata; doesn't fetch every record. |
+
+### `dash.pageGroups`
+
+| Method | Returns |
+|---|---|
+| `.list()` | `{ content_types }` (group metadata, not items) |
+| `.group(slug)` | `PageGroup` (same as `dash.pageGroup(slug)`) |
+
+> **Migrating from `dash.contentTypes`:** the legacy module still works
+> but is deprecated. New code should use `dash.pageGroup(slug)`.
+
+---
+
 ## Installation
 
 ```bash

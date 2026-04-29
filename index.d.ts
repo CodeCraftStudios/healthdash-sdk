@@ -256,7 +256,7 @@ export interface CartItem {
 // OPTIONS
 // =============================================================================
 
-export interface DashClientOptions {
+export interface HealthDashClientOptions {
   /** Your API key (pk_* for public, sk_* for secret) */
   apiKey: string;
   /** Backend URL (default: "http://localhost:8000") */
@@ -1234,7 +1234,7 @@ declare class AuthorizeNetCSR {
 }
 
 declare class PaymentModule {
-  constructor(client: DashClient);
+  constructor(client: HealthDashClient);
 
   /** Whether the processor's client library has been loaded */
   readonly isLoaded: boolean;
@@ -2019,7 +2019,7 @@ export interface CoaDetailResponse {
 }
 
 export declare class CoaModule {
-  constructor(client: DashClient);
+  constructor(client: HealthDashClient);
 
   /** List products that have at least one variation with a lab-report file */
   list(options?: { q?: string }): Promise<CoaListResponse>;
@@ -2057,7 +2057,7 @@ export interface LegalDocumentResponse {
 }
 
 export declare class LegalModule {
-  constructor(client: DashClient);
+  constructor(client: HealthDashClient);
 
   /** List all published legal documents (title, slug, updated_at) */
   list(): Promise<LegalDocumentsListResponse>;
@@ -2104,7 +2104,7 @@ export interface MediaByNameResponse {
 }
 
 export declare class MediaModule {
-  constructor(client: DashClient);
+  constructor(client: HealthDashClient);
 
   /**
    * Get all media files within a named folder
@@ -2132,7 +2132,7 @@ export declare class MediaModule {
 }
 
 export declare class EmailModule {
-  constructor(client: DashClient);
+  constructor(client: HealthDashClient);
 
   /**
    * Identify/update a customer profile in the email provider (Klaviyo).
@@ -2193,7 +2193,7 @@ export interface DiscountStoreRedeemResponse {
 }
 
 export declare class DiscountStoreModule {
-  constructor(client: DashClient);
+  constructor(client: HealthDashClient);
 
   /** List available discount store products (includes customer points if authenticated) */
   list(): Promise<DiscountStoreListResponse>;
@@ -2218,7 +2218,7 @@ export interface EarnPointsCompleteResponse {
 }
 
 export declare class EarnPointsModule {
-  constructor(client: DashClient);
+  constructor(client: HealthDashClient);
 
   /** List completed earn-point tasks for the authenticated customer */
   list(): Promise<EarnPointsListResponse>;
@@ -2228,14 +2228,125 @@ export declare class EarnPointsModule {
 }
 
 // =============================================================================
+// PAGE GROUPS TYPES
+// =============================================================================
+
+export interface PageGroupSummary {
+  id: string;
+  name: string;
+  plural_name: string;
+  slug: string;
+  singular_path: boolean;
+  item_count: number;
+  description?: string;
+}
+
+export interface PageGroupItem {
+  id: string;
+  page_type_id: string;
+  title: string;
+  slug: string;
+  excerpt: string;
+  content: string;
+  featured_image: string | null;
+  featured_image_alt: string;
+  status: string;
+  display_order: number;
+  seo_title: string;
+  seo_description: string;
+  seo_keywords: string;
+  schema_json: Record<string, unknown> | null;
+  custom_fields: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+  gallery?: Array<{
+    id: string;
+    image_url: string;
+    alt_text: string;
+    title: string;
+    description: string;
+    display_order: number;
+    metadata: Record<string, unknown>;
+    created_at: string;
+  }>;
+}
+
+export interface PageGroupListResponse {
+  content_types: PageGroupSummary[];
+}
+
+export interface PageGroupItemsResponse {
+  content_type: PageGroupSummary;
+  items: PageGroupItem[];
+  total: number;
+}
+
+export interface PageGroupItemResponse {
+  item: PageGroupItem;
+}
+
+export interface PageGroupAllOptions {
+  /** Max items per page. Defaults to backend setting (typically 50). */
+  limit?: number;
+  /** Pagination offset. */
+  offset?: number;
+}
+
+export type PageGroupPredicate =
+  | ((item: PageGroupItem) => boolean)
+  | Record<string, unknown>;
+
+/**
+ * Fluent builder for a single Page Group. Returned by `dash.pageGroup(slug)`.
+ */
+export declare class PageGroup {
+  constructor(client: HealthDashClient, slug: string);
+  readonly slug: string;
+
+  /** Fetch every published item (paginated). */
+  all(options?: PageGroupAllOptions): Promise<PageGroupItemsResponse>;
+
+  /**
+   * Filter items client-side by predicate function or object spec.
+   * Object keys are matched against item top-level fields, then `metadata`,
+   * then `custom_fields`.
+   */
+  filter(
+    predicate: PageGroupPredicate,
+    options?: PageGroupAllOptions,
+  ): Promise<PageGroupItem[]>;
+
+  /** Fetch a single published item by slug. */
+  get(itemSlug: string): Promise<PageGroupItemResponse>;
+
+  /** First match for the given filter, or `null` if none. */
+  find(predicate: PageGroupPredicate): Promise<PageGroupItem | null>;
+
+  /** Total published items in this group. */
+  count(): Promise<number>;
+}
+
+export declare class PageGroupsModule {
+  constructor(client: HealthDashClient);
+
+  /** List every published Page Group (collection metadata). */
+  list(): Promise<PageGroupListResponse>;
+
+  /** Get a fluent builder for the named group. */
+  group(slug: string): PageGroup;
+}
+
+// =============================================================================
 // MAIN CLIENT
 // =============================================================================
 
-export declare class DashClient {
+export declare class HealthDashClient {
   /**
-   * Create a new DashClient instance
+   * Create a new HealthDashClient instance
    */
-  constructor(options: DashClientOptions);
+  constructor(options: HealthDashClientOptions);
 
   /** Your API key */
   readonly apiKey: string;
@@ -2301,6 +2412,29 @@ export declare class DashClient {
   readonly earnPoints: EarnPointsModule;
 
   /**
+   * Page Groups — storefront content collections (Doctors, Services,
+   * Locations, etc.) defined in the dashboard's "Page Groups" section.
+   *
+   * @example
+   *   // Fluent shortcut (recommended):
+   *   const { items } = await dash.pageGroup("doctors").all();
+   *   const dr = await dash.pageGroup("doctors").get("dr-patel");
+   *   const cardiologists = await dash.pageGroup("doctors")
+   *     .filter({ specialty: "cardiology" });
+   *
+   *   // Or list all groups:
+   *   const { content_types } = await dash.pageGroups.list();
+   */
+  readonly pageGroups: PageGroupsModule;
+
+  /**
+   * Fluent shortcut for `dash.pageGroups.group(slug)`.
+   * Returns a builder you can chain `.all()`, `.get()`, `.filter()`,
+   * `.find()`, and `.count()` on.
+   */
+  pageGroup(slug: string): PageGroup;
+
+  /**
    * Health check - validates API key and returns organization info
    */
   ping(): Promise<PingResponse>;
@@ -2341,7 +2475,12 @@ export declare class DashClient {
   setSessionId(id: string): void;
 }
 
-export default DashClient;
+export default HealthDashClient;
+
+// Back-compat aliases — old exported names kept working so existing
+// consumers don't break. New code should use the `HealthDash*` names.
+export { HealthDashClient as DashClient };
+export type DashClientOptions = HealthDashClientOptions;
 
 // =============================================================================
 // REVALIDATION HANDLER (Next.js App Router)
