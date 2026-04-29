@@ -2339,6 +2339,101 @@ export declare class PageGroupsModule {
 }
 
 // =============================================================================
+// FORMS MODULE (intake / screening / consent forms built in the dashboard)
+// =============================================================================
+
+export interface FormFieldOptionDef {
+  label: string;
+  value: string;
+}
+
+export interface FormFieldShowWhenDef {
+  field: string;
+  equals: unknown;
+}
+
+export interface FormFieldDef {
+  name: string;
+  label: string;
+  /**
+   * Built-in renderers handle text, email, tel, date, url, number,
+   * hidden, textarea, select, multiselect, checkbox, radio, file, and
+   * signature. Unknown types fall back to a text input.
+   */
+  type: string;
+  required?: boolean;
+  required_message?: string;
+  placeholder?: string;
+  help_text?: string;
+  options?: FormFieldOptionDef[];
+  show_when?: FormFieldShowWhenDef | null;
+  max_length?: number;
+  min_length?: number;
+  signature_width?: number;
+  signature_height?: number;
+  [key: string]: unknown;
+}
+
+export interface FormSchema {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  version: number;
+  fields: FormFieldDef[];
+  scoring?: Record<string, unknown>;
+  is_active: boolean;
+  contains_phi: boolean;
+  success_message: string;
+  redirect_url: string;
+  [key: string]: unknown;
+}
+
+export interface FormGetResponse {
+  form: FormSchema;
+}
+
+export interface FormSignatureInput {
+  field_name?: string;
+  /** Either a typed name or a base64 PNG data URL from <SignaturePad>. */
+  value: string;
+}
+
+export interface FormSubmitPayload {
+  answers: Record<string, unknown>;
+  signatures?: FormSignatureInput[];
+  source_url?: string;
+}
+
+export interface FormSubmitResponse {
+  success: boolean;
+  submission_id: string;
+  submitted_at: string;
+  success_message: string;
+  redirect_url: string;
+  score?: {
+    total?: number;
+    band_label?: string;
+    band_severity?: string;
+    [key: string]: unknown;
+  };
+}
+
+export declare class FormsModule {
+  constructor(client: HealthDashClient);
+
+  /** Fetch the form schema by slug. */
+  get(slug: string): Promise<FormGetResponse>;
+
+  /**
+   * Submit answers. On a 422 the thrown error includes a `fields` map
+   * keyed by field name -> short reason code (`required`, `invalid_option`,
+   * `too_long`).
+   */
+  submit(slug: string, payload: FormSubmitPayload): Promise<FormSubmitResponse>;
+}
+
+// =============================================================================
 // MAIN CLIENT
 // =============================================================================
 
@@ -2410,6 +2505,23 @@ export declare class HealthDashClient {
 
   /** Earn Points (social task completion for loyalty points) */
   readonly earnPoints: EarnPointsModule;
+
+  /**
+   * Forms — storefront-side intake / screening / consent forms whose
+   * schemas are built in the dashboard.
+   *
+   * @example
+   *   const { form } = await dash.forms.get("peptide-intake");
+   *   await dash.forms.submit("peptide-intake", {
+   *     answers: { first_name: "Jane", email: "j@lab.org" },
+   *     source_url: window.location.href,
+   *   });
+   *
+   * In React, prefer the higher-level `useHealthDashForm` hook from
+   * `healthdashsdk/react` — it wires this module to a Django-template
+   * style field accessor (`form.field("first_name").input()` etc.).
+   */
+  readonly forms: FormsModule;
 
   /**
    * Page Groups — storefront content collections (Doctors, Services,

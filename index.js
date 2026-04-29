@@ -35,6 +35,89 @@ import { AdminModule } from "./services/admin.js";
 import { ContentTypesModule } from "./services/content-types.js";
 import { PageGroupsModule, PageGroup } from "./services/page-groups.js";
 import { CalendarModule } from "./services/calendar.js";
+import { FormsModule } from "./services/forms.js";
+
+
+// =============================================================================
+// TLS HARDENING — fail closed if a request would skip TLS verification
+// =============================================================================
+//
+// Goal: NEVER make a request that could leak ePHI over an unverified channel.
+// Three checks, in order:
+//   1. The URL must be `https://` (or a loopback host for local dev).
+//   2. The Node-side bypass `NODE_TLS_REJECT_UNAUTHORIZED=0` is rejected
+//      whenever the target is non-loopback. (Browsers cannot opt out, so
+//      this only matters server-side / in tests.)
+//   3. (Defense in depth) every `_fetch` call re-asserts these on the
+//      exact URL being used, so a runtime override of `baseURL` can't
+//      silently downgrade a request.
+//
+// Failure mode is a thrown Error — never a silent fallback. Production
+// deploys without TLS are unrecoverable from inside the SDK; the only
+// fix is to point the client at an https endpoint.
+
+let _HEALTHDASH_TLS_WARNED = false;
+
+function _isLoopbackHost(host) {
+  const h = (host || "").toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    h === "localhost" ||
+    h === "127.0.0.1" ||
+    h === "::1" ||
+    h.endsWith(".localhost") ||
+    h.endsWith(".local") ||
+    /^127\.\d+\.\d+\.\d+$/.test(h)
+  );
+}
+
+function _assertSecureUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch (_) {
+    throw new Error(
+      `HealthDashSdk: invalid URL "${rawUrl}". The base URL must be a valid absolute URL beginning with https:// (or http:// for loopback only).`,
+    );
+  }
+  const isLoopback = _isLoopbackHost(parsed.hostname);
+
+  // (1) protocol gate
+  if (parsed.protocol !== "https:" && !isLoopback) {
+    throw new Error(
+      `HealthDashSdk: refusing to connect over insecure transport. ` +
+        `URL "${parsed.origin}" must use https:// — only loopback hosts ` +
+        `(localhost, 127.0.0.1, *.local) may use http:// for local development. ` +
+        `Set baseURL to an https endpoint.`,
+    );
+  }
+
+  // (2) Node TLS bypass guard
+  // Browsers ignore process.env, so this branch is harmless there.
+  const env =
+    typeof process !== "undefined" && process.env ? process.env : {};
+  const tlsBypassed = env.NODE_TLS_REJECT_UNAUTHORIZED === "0";
+  if (tlsBypassed) {
+    if (!isLoopback) {
+      throw new Error(
+        `HealthDashSdk: NODE_TLS_REJECT_UNAUTHORIZED=0 is set, which disables ` +
+          `TLS certificate verification — refusing to connect to a non-loopback ` +
+          `endpoint ("${parsed.host}") under those conditions. ` +
+          `Unset the variable, or scope it to local development only.`,
+      );
+    }
+    if (!_HEALTHDASH_TLS_WARNED && typeof console !== "undefined") {
+      _HEALTHDASH_TLS_WARNED = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[HealthDashSdk] NODE_TLS_REJECT_UNAUTHORIZED=0 — TLS verification is " +
+          "disabled. Allowed only because the SDK is targeting a loopback host. " +
+          "NEVER deploy with this variable set.",
+      );
+    }
+  }
+
+  return parsed;
+}
 
 // =============================================================================
 // MAIN CLIENT
@@ -87,6 +170,11 @@ export class HealthDashClient {
 
     this.apiKey = apiKey;
     this.baseURL = baseURL.replace(/\/$/, ""); // Remove trailing slash
+    // Hard gate — refuses to construct a client pointing at an insecure
+    // URL. Throws if baseURL is http:// to a non-loopback host, or if
+    // Node-side TLS verification has been disabled against a non-loopback
+    // target. See `_assertSecureUrl` above for the full rule set.
+    _assertSecureUrl(this.baseURL);
     this._sessionId = null;
     this.version = "0.1.2";
 
@@ -121,6 +209,15 @@ export class HealthDashClient {
     this.earnPoints = new EarnPointsModule(this);
     this.sitemap = new SitemapModule(this);
     this.calendar = new CalendarModule(this);
+
+    // ── Forms ─────────────────────────────────────────────────────────
+    // Storefront-side intake / screening / consent forms. The dashboard
+    // owns the schema; storefronts read it via `dash.forms.get(slug)` and
+    // submit via `dash.forms.submit(slug, payload)`. PHI-bearing answers
+    // round-trip encrypted at rest on the backend (see formbuilder app).
+    // The React `useHealthDashForm` hook (`/react`) provides
+    // Django-template-style field accessors on top of these primitives.
+    this.forms = new FormsModule(this);
 
     // ── Page Groups (storefront content collections) ───────────────────
     // Public reads. Use either:
@@ -313,6 +410,13 @@ export class HealthDashClient {
    * @private
    */
   async _fetch(url, options = {}) {
+    // Re-assert TLS on every call. The constructor checks baseURL once
+    // at instantiation, but a runtime override of `this.baseURL` (or a
+    // module passing in an absolute URL it composed itself) would
+    // bypass that. Keep the gate here so no path can leak ePHI over
+    // an unverified channel.
+    _assertSecureUrl(url);
+
     const headers = {
       "X-API-Key": this.apiKey,
       "Content-Type": "application/json",

@@ -125,3 +125,152 @@ export interface DashImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageEl
 }
 
 export function DashImage(props: DashImageProps): JSX.Element | null;
+
+// ============================================================================
+// SignaturePad
+// ============================================================================
+
+export interface SignaturePadHandle {
+  clear: () => void;
+  isEmpty: () => boolean;
+  toDataURL: () => string;
+}
+
+export interface SignaturePadProps {
+  /** Existing signature as a base64 PNG `data:` URL. Empty string = blank. */
+  value?: string;
+  /** Fires after every stroke completes, with the canvas as a PNG data URL. */
+  onChange?: (value: string) => void;
+  width?: number;
+  height?: number;
+  className?: string;
+  style?: React.CSSProperties;
+  /** Hex stroke color. Defaults to ink. */
+  strokeColor?: string;
+  /** Background fill (defaults to transparent). */
+  backgroundColor?: string;
+  /** Read-only mode — renders an existing signature without controls. */
+  disabled?: boolean;
+  clearLabel?: string;
+  placeholder?: string;
+  signedLabel?: string;
+  /** Hide the status row (label + Clear button). */
+  showStatus?: boolean;
+}
+
+export const SignaturePad: React.ForwardRefExoticComponent<
+  SignaturePadProps & React.RefAttributes<SignaturePadHandle>
+>;
+
+// ============================================================================
+// useHealthDashForm
+// ============================================================================
+
+export interface FormFieldOption {
+  label: string;
+  value: string;
+}
+
+export interface FormFieldShowWhen {
+  field: string;
+  equals: unknown;
+}
+
+export interface FormFieldSchema {
+  name: string;
+  label: string;
+  type:
+    | "text"
+    | "email"
+    | "tel"
+    | "date"
+    | "url"
+    | "number"
+    | "hidden"
+    | "textarea"
+    | "select"
+    | "multiselect"
+    | "checkbox"
+    | "radio"
+    | "file"
+    | "signature"
+    | (string & {});
+  required?: boolean;
+  required_message?: string;
+  placeholder?: string;
+  help_text?: string;
+  options?: FormFieldOption[];
+  show_when?: FormFieldShowWhen | null;
+  max_length?: number;
+  min_length?: number;
+  signature_width?: number;
+  signature_height?: number;
+  [key: string]: unknown;
+}
+
+export interface FormFieldAccessor {
+  name: string;
+  label: string;
+  helpText?: string;
+  type?: string;
+  required?: boolean;
+  options?: FormFieldOption[];
+  visible: boolean;
+  value: unknown;
+  set: (value: unknown) => void;
+  error: string | null;
+  touched: boolean;
+  /** Returns a fully-configured React element for this field type. */
+  input: (extraProps?: Record<string, unknown>) => JSX.Element | null;
+  missing: boolean;
+}
+
+export interface UseHealthDashFormOptions {
+  /** Explicit client (defaults to DashProvider's). */
+  client?: DashClient;
+  /** Pre-fill values keyed by field name. */
+  initialValues?: Record<string, unknown>;
+  onSuccess?: (response: unknown) => void;
+  onError?: (error: unknown) => void;
+}
+
+export interface UseHealthDashFormResult {
+  slug: string;
+  title: string;
+  description: string;
+  fields: FormFieldSchema[];
+
+  loading: boolean;
+  loadError: string | null;
+
+  field: (name: string) => FormFieldAccessor;
+
+  handleSubmit: (
+    onSuccess?: (response: unknown) => void,
+  ) => (event?: React.FormEvent | { preventDefault?: () => void }) => Promise<void>;
+  submitting: boolean;
+  success: boolean;
+  successMessage: string;
+  redirectUrl: string;
+  formError: string | null;
+  score:
+    | null
+    | {
+        total?: number;
+        band_label?: string;
+        band_severity?: string;
+        [key: string]: unknown;
+      };
+
+  values: Record<string, unknown>;
+  errors: Record<string, string>;
+  touched: Record<string, boolean>;
+  setFieldValue: (name: string, value: unknown) => void;
+  setValues: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+  reset: () => void;
+}
+
+export function useHealthDashForm(
+  slug: string,
+  options?: UseHealthDashFormOptions,
+): UseHealthDashFormResult;
