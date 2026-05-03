@@ -26,6 +26,7 @@ import { AffiliatesModule } from "./services/affiliates.js";
 import { TaxModule } from "./services/tax.js";
 import { CoaModule } from "./services/coa.js";
 import { LegalModule } from "./services/legal.js";
+import { PhiModule } from "./services/phi.js";
 import { MediaModule } from "./services/media.js";
 import { ReferralsModule } from "./services/referrals.js";
 import { DiscountStoreModule } from "./services/discount-store.js";
@@ -209,6 +210,9 @@ export class HealthDashClient {
     this.earnPoints = new EarnPointsModule(this);
     this.sitemap = new SitemapModule(this);
     this.calendar = new CalendarModule(this);
+    // PHI proxy — Patient/Practitioner/Observation/Encounter/Document
+    // CRUD via HealthDash backend. Never talks to Medplum directly.
+    this.phi = new PhiModule(this);
 
     // ── Forms ─────────────────────────────────────────────────────────
     // Storefront-side intake / screening / consent forms. The dashboard
