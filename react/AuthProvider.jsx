@@ -103,21 +103,23 @@ export function AuthProvider({
     }
 
     const loadAuth = async () => {
+      // HIPAA: customer profile (PHI) is NEVER persisted to localStorage.
+      // Rehydrate it on each mount via getProfile() once we have a token.
       const token = localStorage.getItem(accessTokenKey);
       const refreshToken = localStorage.getItem(refreshTokenKey);
-      const savedCustomer = localStorage.getItem(customerKey);
+      // Defensive: clean up any customer object left behind by older
+      // app versions that did persist PHI.
+      localStorage.removeItem(customerKey);
 
-      if (token && savedCustomer) {
+      if (token) {
         try {
           client.auth.setToken(token, refreshToken);
 
           const response = await client.auth.getProfile();
           setCustomer(transformCustomer(response.customer));
-          localStorage.setItem(customerKey, JSON.stringify(response.customer));
         } catch (error) {
           localStorage.removeItem(accessTokenKey);
           localStorage.removeItem(refreshTokenKey);
-          localStorage.removeItem(customerKey);
           client.auth.setToken(null);
         }
       }
@@ -128,15 +130,16 @@ export function AuthProvider({
   }, [client, accessTokenKey, refreshTokenKey, customerKey, initialCustomer]);
 
   const saveAuth = useCallback(
-    (accessToken, refreshToken, customerData) => {
+    // `customerData` accepted for backwards-compatibility but intentionally
+    // NOT persisted — PHI must not live in localStorage (HIPAA / XSS).
+    (accessToken, refreshToken, _customerData) => {
       if (typeof window === "undefined") return;
       localStorage.setItem(accessTokenKey, accessToken);
       if (refreshToken) {
         localStorage.setItem(refreshTokenKey, refreshToken);
       }
-      localStorage.setItem(customerKey, JSON.stringify(customerData));
     },
-    [accessTokenKey, refreshTokenKey, customerKey]
+    [accessTokenKey, refreshTokenKey]
   );
 
   const clearAuth = useCallback(() => {
@@ -234,16 +237,12 @@ export function AuthProvider({
         const transformed = transformCustomer(response.customer);
         setCustomer(transformed);
 
-        if (typeof window !== "undefined") {
-          localStorage.setItem(customerKey, JSON.stringify(response.customer));
-        }
-
         return response;
       } finally {
         setIsLoading(false);
       }
     },
-    [client, customerKey]
+    [client]
   );
 
   const refreshProfile = useCallback(async () => {
@@ -254,14 +253,10 @@ export function AuthProvider({
       const response = await client.auth.getProfile();
       const transformed = transformCustomer(response.customer);
       setCustomer(transformed);
-
-      if (typeof window !== "undefined") {
-        localStorage.setItem(customerKey, JSON.stringify(response.customer));
-      }
     } finally {
       setIsLoading(false);
     }
-  }, [client, customerKey]);
+  }, [client]);
 
   const isAuthenticated = !!customer;
 
