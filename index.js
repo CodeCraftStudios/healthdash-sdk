@@ -432,6 +432,16 @@ export class HealthDashClient {
       headers["Authorization"] = `Bearer ${this.auth._accessToken}`;
     }
 
+    // Cookie-mode: attach CSRF token on mutating requests (double-submit
+    // pattern — header value must equal the hd_csrf cookie). The cookie
+    // itself is sent automatically when `credentials: "include"`.
+    const inCookieMode = !!(this.auth && this.auth._cookieMode);
+    const method = (options.method || "GET").toUpperCase();
+    if (inCookieMode && method !== "GET" && method !== "HEAD" &&
+        this.auth._csrfToken && !headers["X-CSRF-Token"]) {
+      headers["X-CSRF-Token"] = this.auth._csrfToken;
+    }
+
     // Include session ID if available (client-side only)
     if (typeof window !== "undefined") {
       const sessionId = this.getSessionId();
@@ -442,6 +452,10 @@ export class HealthDashClient {
     const isDev = typeof process !== "undefined" && process.env?.DEV === "true";
     const fetchOptions = { ...options, headers };
     if (isDev) fetchOptions.cache = "no-store";
+    // Always send credentials so the cookie path works the moment the
+    // backend flips into cookie mode. Header-mode callers are unaffected
+    // because they never set a cookie in the first place.
+    if (!fetchOptions.credentials) fetchOptions.credentials = "include";
 
     const response = await fetch(url, fetchOptions);
 

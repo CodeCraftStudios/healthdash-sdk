@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+
+# scratch / one-off (never commit)
+_tok*
+*.scratch
+*_scratch.*
+*.secret

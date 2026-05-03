@@ -11,6 +11,57 @@ export class AuthModule {
     this._customer = null;
     this._accessToken = null;
     this._refreshToken = null;
+    // Cookie-mode state. When the backend's STOREFRONT_COOKIE_AUTH flag is
+    // on the login/verify/set-password responses include a `csrf` field
+    // and omit `access_token`. We flip into cookie mode the first time we
+    // see that shape, stash the CSRF token in memory only (never
+    // localStorage) and let the cookie carry the JWT itself.
+    this._cookieMode = false;
+    this._csrfToken = null;
+  }
+
+  /**
+   * Whether the client is currently in cookie-auth mode (httpOnly session
+   * cookie set by backend, CSRF double-submit). Detected from login
+   * response shape — true if the server returned a `csrf` field.
+   * @returns {boolean}
+   */
+  get cookieMode() {
+    return this._cookieMode;
+  }
+
+  /**
+   * Current CSRF token, if any. Surfaced for advanced clients that need to
+   * forward it onto their own fetches outside the SDK. The SDK itself
+   * attaches it automatically on non-GET requests when in cookie mode.
+   * @returns {string|null}
+   */
+  get csrfToken() {
+    return this._csrfToken;
+  }
+
+  /**
+   * Apply login/verify/set-password response shape. Centralises the
+   * decision between header-token mode (legacy) and cookie mode (when the
+   * server returned a `csrf` field).
+   * @private
+   */
+  _ingestAuthResponse(response) {
+    if (response && response.csrf) {
+      // Cookie mode — JWT lives in the httpOnly cookie the server set.
+      // Don't store it locally; that's the whole point.
+      this._cookieMode = true;
+      this._csrfToken = response.csrf;
+      this._accessToken = null;
+      this._refreshToken = null;
+    } else if (response) {
+      // Legacy header mode — keep tokens in memory exactly as before.
+      if (response.access_token) this._accessToken = response.access_token;
+      if (response.refresh_token) this._refreshToken = response.refresh_token;
+    }
+    if (response && response.customer) {
+      this._customer = response.customer;
+    }
   }
 
   /**
@@ -42,15 +93,22 @@ export class AuthModule {
    * @returns {boolean}
    */
   get isAuthenticated() {
+    if (this._cookieMode) {
+      // Source of truth in cookie mode is the httpOnly cookie which JS
+      // can't see. We treat the in-memory CSRF + customer as the proxy.
+      return !!this._csrfToken && !!this._customer;
+    }
     return !!this._accessToken && !!this._customer;
   }
 
   /**
-   * Set auth token (for restoring session)
+   * Set auth token (for restoring session). No-op when in cookie mode —
+   * tokens aren't stored client-side at all in that path.
    * @param {string} token - Access token
    * @param {string} [refreshToken] - Refresh token
    */
   setToken(token, refreshToken) {
+    if (this._cookieMode) return;
     this._accessToken = token;
     if (refreshToken) {
       this._refreshToken = refreshToken;
@@ -62,6 +120,18 @@ export class AuthModule {
    * @returns {Promise<{access_token: string, token_type: string, expires_in: number}>}
    */
   async refreshAccessToken() {
+    // Cookie mode: the server reads the refresh token off the hd_refresh
+    // cookie and sets new cookies on the response. Body is empty.
+    if (this._cookieMode) {
+      const url = `${this.client.baseURL}/api/storefront/auth/refresh`;
+      const response = await this.client._fetch(url, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      this._ingestAuthResponse(response);
+      return response;
+    }
+
     if (!this._refreshToken) {
       throw new Error("No refresh token available");
     }
@@ -129,10 +199,9 @@ export class AuthModule {
       body: JSON.stringify({ email, code }),
     });
 
-    // Update local state
-    this._customer = response.customer;
-    this._accessToken = response.access_token;
-    this._refreshToken = response.refresh_token;
+    // Update local state — handles both cookie mode (csrf field present)
+    // and legacy header mode (access_token / refresh_token in body).
+    this._ingestAuthResponse(response);
 
     return response;
   }
@@ -160,9 +229,7 @@ export class AuthModule {
       body: JSON.stringify(body),
     });
 
-    this._customer = response.customer;
-    this._accessToken = response.access_token;
-    this._refreshToken = response.refresh_token;
+    this._ingestAuthResponse(response);
 
     return response;
   }
@@ -173,7 +240,7 @@ export class AuthModule {
    * @returns {Promise<{message: string, customer: Object}>}
    */
   async setPassword(password) {
-    if (!this._accessToken) {
+    if (!this.isAuthenticated && !this._accessToken) {
       throw new Error("Not authenticated");
     }
 
@@ -182,17 +249,19 @@ export class AuthModule {
     }
 
     const url = `${this.client.baseURL}/api/storefront/auth/set-password`;
+    const headers = {};
+    if (!this._cookieMode && this._accessToken) {
+      headers.Authorization = `Bearer ${this._accessToken}`;
+    }
     const response = await this.client._fetch(url, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${this._accessToken}`,
-      },
+      headers,
       body: JSON.stringify({ password }),
     });
 
-    if (response.customer) {
-      this._customer = response.customer;
-    }
+    // In cookie mode the server may rotate the CSRF token here; ingest so
+    // the SDK's in-memory copy stays in sync.
+    this._ingestAuthResponse(response);
 
     return response;
   }
@@ -290,14 +359,17 @@ export class AuthModule {
    * @returns {Promise<void>}
    */
   async logout() {
-    if (this._accessToken) {
+    const wasAuthed = this._cookieMode || !!this._accessToken;
+    if (wasAuthed) {
       try {
         const url = `${this.client.baseURL}/api/storefront/auth/logout`;
+        const headers = {};
+        if (!this._cookieMode && this._accessToken) {
+          headers.Authorization = `Bearer ${this._accessToken}`;
+        }
         await this.client._fetch(url, {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${this._accessToken}`,
-          },
+          headers,
         });
       } catch (e) {
         // Ignore logout errors
@@ -307,6 +379,8 @@ export class AuthModule {
     this._customer = null;
     this._accessToken = null;
     this._refreshToken = null;
+    this._cookieMode = false;
+    this._csrfToken = null;
   }
 
   /**
