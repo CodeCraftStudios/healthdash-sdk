@@ -47,10 +47,20 @@ export class CartModule {
    * @param {string} options.productId - Product ID
    * @param {string} options.sizeId - Size ID
    * @param {number} options.quantity - Quantity (default: 1)
+   * @param {"one-time"|"subscription"} [options.purchaseMode] - Defaults to
+   *   "one-time". When "subscription", the backend creates a separate cart
+   *   line at the subscribe-and-save price (qty always 1; re-adding is a
+   *   no-op so the customer can't accidentally double-subscribe).
    * @returns {Promise<{cart_id: string, item: Object}>}
    */
   async add(options) {
-    const { productId, sizeId, quantity = 1, freestyleSelections } = options;
+    const {
+      productId,
+      sizeId,
+      quantity = 1,
+      freestyleSelections,
+      purchaseMode,
+    } = options;
 
     if (!productId || !sizeId) {
       throw new Error("productId and sizeId are required");
@@ -64,6 +74,9 @@ export class CartModule {
     };
     if (freestyleSelections) {
       body.freestyle_selections = freestyleSelections;
+    }
+    if (purchaseMode) {
+      body.purchase_mode = purchaseMode;
     }
 
     const url = `${this.client.baseURL}/api/storefront/cart/add`;
