@@ -240,16 +240,84 @@ export interface Pagination {
   has_more: boolean;
 }
 
+export type CartLinePurchaseMode = "one-time" | "subscription";
+
 export interface CartItem {
+  /** Stable line ID — distinct from product_id for two-of-same-product cases. */
+  id?: string;
   product_id: string;
   product_name: string;
+  /** SEO slug — used for storefront product page deep links from line items. */
+  product_slug?: string | null;
+  /** Optional category slug chain ("peptides/glp-1") for breadcrumbing. */
+  category_slug?: string | null;
   product_image: string | null;
   size_id: string;
   size_label: string;
+  /** Variation pickers expose this when the size belongs to a chosen attribute. */
+  variation_name?: string | null;
+  variation_slug?: string | null;
+  /** Per-size override image, when present. */
+  size_image?: string | null;
   quantity: number;
   unit_price: string;
   total_price: string;
-  cannabinoid_type: string;
+  /**
+   * Original (pre-discount) prices from the size record, for rendering
+   * a strike-through next to `unit_price`/`total_price` when the size
+   * has `discounted_price` set.
+   */
+  original_unit_price?: string | null;
+  original_total_price?: string | null;
+  stock_available?: number;
+  cannabinoid_type?: string;
+  points?: number;
+  /**
+   * Bulk-discount tier ladder for this size, when configured.
+   * Shape stays loose because the tiers are admin-authored.
+   */
+  bulk_discounts?: Array<Record<string, unknown>>;
+  /**
+   * Bundle metadata. `bundle_type === "fixed"` exposes `bundle_includes`.
+   */
+  bundle_type?: string | null;
+  is_bundle?: boolean;
+  bundle_includes?: Array<{
+    name: string;
+    slug: string | null;
+    variation_name: string | null;
+    quantity: number;
+    image: string | null;
+  }> | null;
+  /** Per-line freestyle bundle selections (when `metadata.freestyle_selections`). */
+  freestyle_selections?: unknown[] | null;
+  /**
+   * Subscription lines are quantity-locked at 1; flagged so the UI can
+   * disable the qty stepper and label the row.
+   */
+  purchase_mode?: CartLinePurchaseMode;
+  is_subscription?: boolean;
+  /** Time-boxed upsell pricing (post-purchase upsell flow). */
+  is_upsell?: boolean;
+  upsell_original_price?: string | null;
+  upsell_expires_at?: string | null;
+  /** BOGO promo metadata when the line is a free reward unit. */
+  is_bogo_reward?: boolean;
+  bogo_reward_promo_name?: string | null;
+  bogo_reward_original_unit_price?: string | null;
+  bogo?: {
+    promo_id: string;
+    promo_name: string;
+    role: string;
+    units: number;
+    discount_amount: string;
+  } | null;
+  /**
+   * Slugs of intake forms the customer must complete after purchase
+   * before this line can ship. Pulled from `product.custom_fields.requiredForms`
+   * by the cart serializer.
+   */
+  required_forms?: string[];
 }
 
 // =============================================================================
@@ -1502,6 +1570,12 @@ export interface CheckoutCompleteData {
   code?: string;
   /** Shipping address */
   shipping: CheckoutShipping;
+  /**
+   * Billing address. Defaults to shipping if omitted. The backend
+   * enforces shipping/billing match when the org has
+   * `match_shipping_billing_address` set.
+   */
+  billing?: CheckoutShipping;
   /** Optional order notes */
   customerNotes?: string;
   /** Payment authorization data */
