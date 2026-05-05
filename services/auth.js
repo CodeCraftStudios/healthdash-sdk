@@ -5,26 +5,49 @@
  * Handles sessions and customer data.
  */
 
+// localStorage keys. Namespaced so multi-app Storefronts on the same
+// origin (rare but possible) don't collide.
+const LS_ACCESS_TOKEN = "hd_access_token";
+const LS_REFRESH_TOKEN = "hd_refresh_token";
+
+function _readLS(key) {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function _writeLS(key, value) {
+  if (typeof window === "undefined") return;
+  try {
+    if (value == null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch {
+    /* private mode / quota — non-fatal */
+  }
+}
+
 export class AuthModule {
   constructor(client) {
     this.client = client;
     this._customer = null;
-    this._accessToken = null;
-    this._refreshToken = null;
-    // Cookie-mode state. When the backend's STOREFRONT_COOKIE_AUTH flag is
-    // on the login/verify/set-password responses include a `csrf` field
-    // and omit `access_token`. We flip into cookie mode the first time we
-    // see that shape, stash the CSRF token in memory only (never
-    // localStorage) and let the cookie carry the JWT itself.
+    // Bearer tokens are persisted to localStorage so they survive page
+    // reloads on any port/scheme. Cookies are still used when both ends
+    // share an origin, but we no longer rely on them — a sibling-origin
+    // setup (https://localhost:3001 frontend + http://localhost:8000
+    // Django, or DO-app frontend + api.healthdash.com backend) would
+    // otherwise drop the cookie under Schemeful Same-Site and look like
+    // a logout on every reload.
+    this._accessToken = _readLS(LS_ACCESS_TOKEN);
+    this._refreshToken = _readLS(LS_REFRESH_TOKEN);
     this._cookieMode = false;
     this._csrfToken = null;
 
-    // Re-hydrate cookie-mode on every fresh module load. The httpOnly
-    // `hd_session` cookie is invisible to JS, but the companion `hd_csrf`
-    // cookie isn't — its presence is a strong signal we logged in via
-    // cookie auth previously. Pre-populating both fields means a hard
-    // reload (or HMR remount) doesn't strand mutating calls without a
-    // CSRF header until the next getProfile() lands.
+    // Re-hydrate cookie-mode (CSRF double-submit) when the hd_csrf cookie
+    // is visible — only meaningful when frontend and backend share an
+    // origin. Harmless cross-origin (cookie just isn't present).
     if (typeof document !== "undefined") {
       const m = document.cookie.match(/(?:^|;\s*)hd_csrf=([^;]+)/);
       if (m) {
@@ -61,19 +84,23 @@ export class AuthModule {
    * @private
    */
   _ingestAuthResponse(response) {
-    if (response && response.csrf) {
-      // Cookie mode — JWT lives in the httpOnly cookie the server set.
-      // Don't store it locally; that's the whole point.
+    if (!response) return;
+    // Cookie mode is opportunistic — set when present, but don't blow
+    // away the bearer token. The backend now returns both, and the
+    // bearer is what survives cross-site reloads.
+    if (response.csrf) {
       this._cookieMode = true;
       this._csrfToken = response.csrf;
-      this._accessToken = null;
-      this._refreshToken = null;
-    } else if (response) {
-      // Legacy header mode — keep tokens in memory exactly as before.
-      if (response.access_token) this._accessToken = response.access_token;
-      if (response.refresh_token) this._refreshToken = response.refresh_token;
     }
-    if (response && response.customer) {
+    if (response.access_token) {
+      this._accessToken = response.access_token;
+      _writeLS(LS_ACCESS_TOKEN, response.access_token);
+    }
+    if (response.refresh_token) {
+      this._refreshToken = response.refresh_token;
+      _writeLS(LS_REFRESH_TOKEN, response.refresh_token);
+    }
+    if (response.customer) {
       this._customer = response.customer;
     }
   }
@@ -408,6 +435,8 @@ export class AuthModule {
     this._refreshToken = null;
     this._cookieMode = false;
     this._csrfToken = null;
+    _writeLS(LS_ACCESS_TOKEN, null);
+    _writeLS(LS_REFRESH_TOKEN, null);
   }
 
   /**
