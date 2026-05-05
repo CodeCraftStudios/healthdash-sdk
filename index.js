@@ -459,7 +459,24 @@ export class HealthDashClient {
 
     const response = await fetch(url, fetchOptions);
 
-    const data = await response.json();
+    // Robust body parser. Django's debug 500 page is HTML, so blindly
+    // calling `.json()` on a non-OK response would throw
+    // "Unexpected token '<'" and bury the real status code. Read text
+    // first, attempt JSON, fall back to a minimal `{error}` object so
+    // callers always see `error.status` and a usable message.
+    const rawBody = await response.text();
+    let data;
+    try {
+      data = rawBody ? JSON.parse(rawBody) : {};
+    } catch {
+      data = {
+        error: response.ok ? "invalid_json" : `http_${response.status}`,
+        message: response.ok
+          ? "Server returned a non-JSON response."
+          : `Server error ${response.status}: ${response.statusText || "request failed"}.`,
+        raw: rawBody.slice(0, 500),
+      };
+    }
 
     if (!response.ok) {
       // Auto-redirect to /banned on ban responses (client-side only)
