@@ -18,6 +18,20 @@ export class AuthModule {
     // localStorage) and let the cookie carry the JWT itself.
     this._cookieMode = false;
     this._csrfToken = null;
+
+    // Re-hydrate cookie-mode on every fresh module load. The httpOnly
+    // `hd_session` cookie is invisible to JS, but the companion `hd_csrf`
+    // cookie isn't — its presence is a strong signal we logged in via
+    // cookie auth previously. Pre-populating both fields means a hard
+    // reload (or HMR remount) doesn't strand mutating calls without a
+    // CSRF header until the next getProfile() lands.
+    if (typeof document !== "undefined") {
+      const m = document.cookie.match(/(?:^|;\s*)hd_csrf=([^;]+)/);
+      if (m) {
+        this._cookieMode = true;
+        this._csrfToken = decodeURIComponent(m[1]);
+      }
+    }
   }
 
   /**
@@ -311,18 +325,31 @@ export class AuthModule {
    * @returns {Promise<{customer: Object}>}
    */
   async getProfile() {
-    if (!this._accessToken) {
-      throw new Error("Not authenticated");
-    }
-
+    // Don't gate this on `_accessToken` being set in memory. In cookie-auth
+    // mode the JWT lives in an httpOnly `hd_session` cookie that survives
+    // page reloads / HMR / new tabs — but the SDK's in-memory state
+    // (_accessToken, _cookieMode, _csrfToken) is wiped on every module
+    // load. Bailing here meant every reload looked like a logout even
+    // though the session cookie was still valid; the backend's response
+    // is the source of truth, so always make the call.
     const url = `${this.client.baseURL}/api/storefront/auth/me`;
-    const response = await this.client._fetch(url, {
-      headers: {
-        Authorization: `Bearer ${this._accessToken}`,
-      },
-    });
+    const fetchOpts = this._accessToken
+      ? { headers: { Authorization: `Bearer ${this._accessToken}` } }
+      : {};
+    const response = await this.client._fetch(url, fetchOpts);
 
     this._customer = response.customer;
+    // If we got back a customer without ever having seen an access_token
+    // in memory, we authenticated via the session cookie. Re-hydrate
+    // cookie-mode state so subsequent mutating calls send the CSRF
+    // header (the `hd_csrf` cookie is non-httpOnly and we mirror it).
+    if (response.customer && !this._accessToken && !this._cookieMode) {
+      this._cookieMode = true;
+      if (typeof document !== "undefined") {
+        const m = document.cookie.match(/(?:^|;\s*)hd_csrf=([^;]+)/);
+        if (m) this._csrfToken = decodeURIComponent(m[1]);
+      }
+    }
     return response;
   }
 
@@ -336,16 +363,16 @@ export class AuthModule {
    * @returns {Promise<{customer: Object}>}
    */
   async updateProfile(data) {
-    if (!this._accessToken) {
-      throw new Error("Not authenticated");
-    }
-
+    // Same fix as getProfile — don't bail on the in-memory token. Cookie
+    // mode authenticates via the `hd_session` cookie; `_fetch` already
+    // mirrors `hd_csrf` into the X-CSRF-Token header for mutating calls.
     const url = `${this.client.baseURL}/api/storefront/auth/me`;
+    const headers = this._accessToken
+      ? { Authorization: `Bearer ${this._accessToken}` }
+      : undefined;
     const response = await this.client._fetch(url, {
       method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${this._accessToken}`,
-      },
+      ...(headers ? { headers } : {}),
       // Pass through data as-is - backend expects snake_case
       body: JSON.stringify(data),
     });
