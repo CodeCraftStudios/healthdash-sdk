@@ -5,49 +5,26 @@
  * Handles sessions and customer data.
  */
 
-// localStorage keys. Namespaced so multi-app Storefronts on the same
-// origin (rare but possible) don't collide.
-const LS_ACCESS_TOKEN = "hd_access_token";
-const LS_REFRESH_TOKEN = "hd_refresh_token";
-
-function _readLS(key) {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function _writeLS(key, value) {
-  if (typeof window === "undefined") return;
-  try {
-    if (value == null) window.localStorage.removeItem(key);
-    else window.localStorage.setItem(key, value);
-  } catch {
-    /* private mode / quota — non-fatal */
-  }
-}
-
 export class AuthModule {
   constructor(client) {
     this.client = client;
     this._customer = null;
-    // Bearer tokens are persisted to localStorage so they survive page
-    // reloads on any port/scheme. Cookies are still used when both ends
-    // share an origin, but we no longer rely on them — a sibling-origin
-    // setup (https://localhost:3001 frontend + http://localhost:8000
-    // Django, or DO-app frontend + api.healthdash.com backend) would
-    // otherwise drop the cookie under Schemeful Same-Site and look like
-    // a logout on every reload.
-    this._accessToken = _readLS(LS_ACCESS_TOKEN);
-    this._refreshToken = _readLS(LS_REFRESH_TOKEN);
+    // HIPAA: never touch localStorage / sessionStorage for auth tokens.
+    // The session JWT lives exclusively in the httpOnly `hd_session`
+    // cookie set by the backend (SameSite=None; Secure so it works
+    // cross-origin under Schemeful Same-Site, including dev's
+    // https://localhost:3001 + http://localhost:8000 split via
+    // Chrome's localhost-is-secure exception).
+    this._accessToken = null;
+    this._refreshToken = null;
     this._cookieMode = false;
     this._csrfToken = null;
 
-    // Re-hydrate cookie-mode (CSRF double-submit) when the hd_csrf cookie
-    // is visible — only meaningful when frontend and backend share an
-    // origin. Harmless cross-origin (cookie just isn't present).
+    // When the storefront and backend share an origin, the hd_csrf
+    // cookie is JS-readable and we can pre-populate _csrfToken for
+    // mutating requests. Cross-origin: this is a no-op (cookie is on a
+    // different origin) and we wait for getProfile() to echo the CSRF
+    // token in its response body to rehydrate.
     if (typeof document !== "undefined") {
       const m = document.cookie.match(/(?:^|;\s*)hd_csrf=([^;]+)/);
       if (m) {
@@ -85,20 +62,18 @@ export class AuthModule {
    */
   _ingestAuthResponse(response) {
     if (!response) return;
-    // Cookie mode is opportunistic — set when present, but don't blow
-    // away the bearer token. The backend now returns both, and the
-    // bearer is what survives cross-site reloads.
     if (response.csrf) {
+      // Cookie mode — JWT lives in the httpOnly cookie. Stash CSRF in
+      // memory only (HIPAA: no token persistence in JS-readable storage).
       this._cookieMode = true;
       this._csrfToken = response.csrf;
-    }
-    if (response.access_token) {
-      this._accessToken = response.access_token;
-      _writeLS(LS_ACCESS_TOKEN, response.access_token);
-    }
-    if (response.refresh_token) {
-      this._refreshToken = response.refresh_token;
-      _writeLS(LS_REFRESH_TOKEN, response.refresh_token);
+      this._accessToken = null;
+      this._refreshToken = null;
+    } else {
+      // Legacy header mode (dashboards, server-side callers). In-memory
+      // only; AuthContext does not surface these to localStorage.
+      if (response.access_token) this._accessToken = response.access_token;
+      if (response.refresh_token) this._refreshToken = response.refresh_token;
     }
     if (response.customer) {
       this._customer = response.customer;
@@ -366,16 +341,15 @@ export class AuthModule {
     const response = await this.client._fetch(url, fetchOpts);
 
     this._customer = response.customer;
-    // If we got back a customer without ever having seen an access_token
-    // in memory, we authenticated via the session cookie. Re-hydrate
-    // cookie-mode state so subsequent mutating calls send the CSRF
-    // header (the `hd_csrf` cookie is non-httpOnly and we mirror it).
-    if (response.customer && !this._accessToken && !this._cookieMode) {
+    // After cross-origin reloads we have neither a Bearer token nor a
+    // readable CSRF cookie. The backend echoes its current CSRF value
+    // in the `csrf` field of /auth/me — adopt it so subsequent mutating
+    // calls (place order, update profile) carry X-CSRF-Token. Same-
+    // origin: this is redundant (constructor already set it) but
+    // cheap and idempotent.
+    if (response.customer) {
       this._cookieMode = true;
-      if (typeof document !== "undefined") {
-        const m = document.cookie.match(/(?:^|;\s*)hd_csrf=([^;]+)/);
-        if (m) this._csrfToken = decodeURIComponent(m[1]);
-      }
+      if (response.csrf) this._csrfToken = response.csrf;
     }
     return response;
   }
@@ -435,8 +409,6 @@ export class AuthModule {
     this._refreshToken = null;
     this._cookieMode = false;
     this._csrfToken = null;
-    _writeLS(LS_ACCESS_TOKEN, null);
-    _writeLS(LS_REFRESH_TOKEN, null);
   }
 
   /**
