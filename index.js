@@ -321,12 +321,9 @@ export class HealthDashClient {
         return;
       }
 
-      // Check if branding already exists in footer (SSR-rendered).
-      // We match on the new "Health Dash" text and the canonical link so
-      // hosts that render their own branded version short-circuit.
+      // Check if branding already exists in footer (SSR-rendered)
       if (document.getElementById("healthdashsdk-branding") ||
-          footer.innerHTML.includes("telehealthcrm.com") ||
-          footer.innerHTML.includes("Powered By Health Dash") ||
+          footer.innerHTML.includes("healthdashsdk.com") ||
           footer.innerHTML.includes("Powered by HealthDashSdk")) {
         return; // Branding already present, skip injection
       }
@@ -344,7 +341,7 @@ export class HealthDashClient {
       `;
 
       brandingDiv.innerHTML = `
-        Powered By <a href="https://telehealthcrm.com/" target="_blank" rel="noopener noreferrer" style="font-weight: 600; color: #0369a1; text-decoration: none;">Health Dash</a>
+        Powered by <a href="https://healthdashsdk.com" target="_blank" rel="noopener noreferrer" style="font-weight: 600; color: #0369a1; text-decoration: none;">HealthDashSdk</a>
         <span style="color: #4b5563; font-size: 11px; margin-left: 4px;">v${this.version}</span>
       `;
 
