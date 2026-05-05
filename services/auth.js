@@ -256,10 +256,9 @@ export class AuthModule {
    * @returns {Promise<{message: string, customer: Object}>}
    */
   async setPassword(password) {
-    if (!this.isAuthenticated && !this._accessToken) {
-      throw new Error("Not authenticated");
-    }
-
+    // Don't gate on the in-memory bearer; the backend authenticates
+    // via cookie when it's there. We can't tell from here whether the
+    // user is signed in, so let the server return 401 if not.
     if (!password || password.length < 8) {
       throw new Error("Password must be at least 8 characters");
     }
@@ -423,10 +422,7 @@ export class AuthModule {
    * await dash.auth.updateMetadata({ preferred_color: null });
    */
   async updateMetadata(metadata) {
-    if (!this._accessToken) {
-      throw new Error("Not authenticated");
-    }
-
+    // updateProfile() handles the cookie-vs-bearer fallback itself.
     return this.updateProfile({ metadata });
   }
 
@@ -438,21 +434,18 @@ export class AuthModule {
    * @returns {Promise<{orders: Object[], pagination: Object}>}
    */
   async getOrders(options = {}) {
-    if (!this._accessToken) {
-      throw new Error("Not authenticated");
-    }
-
+    // Same fix as getProfile — let cookie auth carry the request when
+    // the in-memory bearer is absent (page reload / new tab / HMR).
     const params = new URLSearchParams();
     if (options.limit) params.append("limit", options.limit);
     if (options.offset) params.append("offset", options.offset);
 
     const qs = params.toString();
     const url = `${this.client.baseURL}/api/storefront/auth/orders${qs ? `?${qs}` : ""}`;
-    return this.client._fetch(url, {
-      headers: {
-        Authorization: `Bearer ${this._accessToken}`,
-      },
-    });
+    const fetchOpts = this._accessToken
+      ? { headers: { Authorization: `Bearer ${this._accessToken}` } }
+      : {};
+    return this.client._fetch(url, fetchOpts);
   }
 
   /**
@@ -461,16 +454,11 @@ export class AuthModule {
    * @returns {Promise<{order: Object}>}
    */
   async getOrder(orderId) {
-    if (!this._accessToken) {
-      throw new Error("Not authenticated");
-    }
-
     const url = `${this.client.baseURL}/api/storefront/auth/orders/${orderId}`;
-    return this.client._fetch(url, {
-      headers: {
-        Authorization: `Bearer ${this._accessToken}`,
-      },
-    });
+    const fetchOpts = this._accessToken
+      ? { headers: { Authorization: `Bearer ${this._accessToken}` } }
+      : {};
+    return this.client._fetch(url, fetchOpts);
   }
 
   /**
