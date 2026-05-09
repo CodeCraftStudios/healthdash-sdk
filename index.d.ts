@@ -47,6 +47,34 @@ export interface ProductSize {
   points: number;
   /** Bulk discount tiers for this size */
   bulk_discounts?: BulkDiscount[];
+  /**
+   * Active subscribe-and-save plans configured for this size. The
+   * storefront uses the first entry to render the "Subscribe & Save N% off"
+   * CTA on the product page; the cart authoritatively re-resolves the
+   * plan at add-to-cart time, so a stale list can't game the discount.
+   */
+  subscription_plans?: SubscriptionPlanOffer[];
+}
+
+/**
+ * Active subscribe-and-save plan attached to a ProductSize. Configured
+ * per-size in the dashboard (Inventory → Subscriptions). When non-empty,
+ * the storefront should expose a Subscribe & Save option at checkout.
+ */
+export interface SubscriptionPlanOffer {
+  id: number;
+  name: string;
+  /** How many `interval_unit` periods between charges (e.g. 1 month, 3 months). */
+  interval_length: number;
+  interval_unit: "days" | "months" | string;
+  /** 0–100. UI typically renders as `Math.round(discount_percent)`%. */
+  discount_percent: string;
+  /** Number of trial cycles before the plan switches to its regular price. */
+  trial_occurrences: number;
+  /** Per-cycle trial price; null = free trial cycles. */
+  trial_amount: string | null;
+  /** Total billing cycles before the plan ends (default 9999 = effectively unlimited). */
+  total_occurrences: number;
 }
 
 /**
